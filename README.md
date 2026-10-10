@@ -1,132 +1,57 @@
-<div align="center">
-    <br>
-    <a href="https://github.com/sissbruecker/linkding">
-        <img src="assets/header.svg" height="50">
-    </a>
-    <br>
-</div>
+# linkding (modified)
 
-##  Introduction
+> **This is a modified fork of [linkding](https://github.com/sissbruecker/linkding) by Sascha Ißbrücker.**
+> It is not the official project and is not supported by its maintainer.
+> Report issues with the additions below here, not upstream.
 
-linkding is a bookmark manager that you can host yourself.
-It's designed be to be minimal, fast, and easy to set up using Docker.
+linkding is a minimal, fast, self-hosted bookmark manager. This fork keeps all of upstream's features
+(tags, bulk editing, Markdown notes, sharing, HTML snapshots, browser extensions, REST API, OIDC and more,
+see the [official docs](https://linkding.link/)) and adds the features listed below.
 
-The name comes from:
-- *link* which is often used as a synonym for URLs and bookmarks in common language
-- *Ding* which is German for thing
-- ...so basically something for managing your links
+## Added in this fork
 
-**Feature Overview:**
-- Clean UI optimized for readability
-- Organize bookmarks with tags
-- Bulk editing, Markdown notes, read it later functionality
-- Share bookmarks with other users or guests
-- Automatically provides titles, descriptions and icons of bookmarked websites
-- Automatically archive websites, either as local HTML file or on Internet Archive
-- Import and export bookmarks in Netscape HTML format
-- Installable as a Progressive Web App (PWA)
-- Extensions for [Firefox](https://addons.mozilla.org/firefox/addon/linkding-extension/) and [Chrome](https://chrome.google.com/webstore/detail/linkding-extension/beakmhbijpdhipnjhnclmhgjlddhidpe), as well as a bookmarklet
-- SSO support via OIDC or authentication proxies
-- REST API for developing 3rd party apps
-- Admin panel for user self-service and raw data access
+### AI tagging (bring your own key)
 
+Lets an AI model suggest tags for your bookmarks, using your own Anthropic or OpenAI API key.
+Configure it under **Settings → General → AI Tagging**:
 
-**Demo:** https://demo.linkding.link/
+- **Provider and API key:** Anthropic (Claude) or OpenAI. Once saved, the key is never shown again.
+- **Model:** pick from a list (the default is the provider's cheapest model, `claude-haiku-5-5` or `gpt-5.4-nano`) or enter any model ID.
+- **Tag selection:** prefer your existing tags and create new ones only if needed, or only use existing tags.
+- **Maximum number of tags** per bookmark (1 to 10), and **custom instructions** added to the prompt.
+- **Automatically tag new bookmarks**, optionally skipping bookmarks that already have tags.
+- **Tag existing bookmarks** with the "Tag with AI" bulk action, or tag all untagged bookmarks from the settings page.
 
-**Screenshot:**
+Tagging runs in the background and only adds tags, it never removes them. The URL, title and description of
+each bookmark, and the names of your existing tags, are sent to the selected provider. The API key is stored
+in plain text in the linkding database.
 
-![Screenshot](/docs/public/linkding-screenshot.png?raw=true "Screenshot")
+## Running this fork
 
-## Getting Started
+The official Docker images (`sissbruecker/linkding`) do **not** include these changes. Build your own image:
 
-The following links help you to get started with linkding:
-- [Install linkding on your own server](https://linkding.link/installation) or [check managed hosting options](https://linkding.link/managed-hosting)
-- [Install the browser extension](https://linkding.link/browser-extension)
-- [Check out community projects](https://linkding.link/community), which include mobile apps, browser extensions, libraries and more
+```
+docker build -f docker/default.Dockerfile --target linkding -t linkding-modified .
+```
 
-## Documentation
-
-The full documentation is now available at [linkding.link](https://linkding.link/).
-
-If you want to contribute to the documentation, you can find the source files in the `docs` folder.
-
-If you want to contribute a community project, feel free to [submit a PR](https://github.com/sissbruecker/linkding/edit/master/docs/src/content/docs/community.md).
-
-## Contributing
-
-Small improvements, bugfixes and documentation improvements are always welcome. If you want to contribute a larger feature, consider opening an issue first to discuss it. I may choose to ignore PRs for features that don't align with the project's goals or that I don't want to maintain.
+Then follow the upstream [installation guide](https://linkding.link/installation), using `linkding-modified`
+in place of `sissbruecker/linkding:latest` (for example in `docker-compose.yml`).
+Database migrations run automatically on startup.
 
 ## Development
 
-The application is built using the Django web framework. You can get started by checking out the excellent [Django docs](https://docs.djangoproject.com/en/4.1/). The `bookmarks` folder contains the actual bookmark application. Other than that the code should be self-explanatory / standard Django stuff 🙂.
+Requires Python 3.13, [uv](https://docs.astral.sh/uv/getting-started/installation/) and Node.js.
 
-### Prerequisites
-- Python 3.13
-- [uv](https://docs.astral.sh/uv/getting-started/installation/)
-- Node.js
-
-### Setup
-
-Initialize the development environment with:
 ```
-make init
-```
-This sets up a virtual environment using uv, installs NPM dependencies and runs migrations to create the initial database.
-
-Create a user for the frontend:
-```
+make init        # create the virtual environment, install npm packages, run migrations
 uv run manage.py createsuperuser --username=joe --email=joe@example.com
+make frontend    # build frontend components
+make serve       # start the dev server at http://localhost:8000
 ```
 
-Run the frontend build for bundling frontend components with:
-```
-make frontend
-```
+`make test` runs the tests, `make lint` lints, and `make format` formats the code.
 
-Then start the Django development server with:
-```
-make serve
-```
-The frontend is now available under http://localhost:8000
+## License
 
-### Tests
-
-Run all tests with pytest:
-```
-make test
-```
-
-
-### Linting
-
-Run linting with ruff:
-```
-make lint
-```
-
-### Formatting
-
-Format Python code with ruff, Django templates with djlint, and JavaScript code with prettier:
-```
-make format
-```
-
-### DevContainers
-
-This repository also supports DevContainers: [![Open in Remote - Containers](https://img.shields.io/static/v1?label=Remote%20-%20Containers&message=Open&color=blue&logo=visualstudiocode)](https://vscode.dev/redirect?url=vscode://ms-vscode-remote.remote-containers/cloneInVolume?url=https://github.com/sissbruecker/linkding.git)
-
-Once checked out, only the following commands are required to get started:
-
-Create a user for the frontend:
-```
-uv run manage.py createsuperuser --username=joe --email=joe@example.com
-```
-Start the Node.js development server (used for compiling JavaScript components like tag auto-completion) with:
-```
-make frontend
-```
-Start the Django development server with:
-```
-make serve
-```
-The frontend is now available under http://localhost:8000
+linkding is licensed under the MIT license, see [LICENSE.txt](LICENSE.txt). All credit for linkding itself goes
+to its [original author and contributors](https://github.com/sissbruecker/linkding/graphs/contributors).
