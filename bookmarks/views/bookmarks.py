@@ -20,6 +20,7 @@ from bookmarks.models import (
 from bookmarks.services import assets as asset_actions
 from bookmarks.services import tasks
 from bookmarks.services.bookmarks import (
+    ai_tag_bookmarks,
     archive_bookmark,
     archive_bookmarks,
     create_html_snapshots,
@@ -418,6 +419,8 @@ def handle_action(request: HttpRequest, query: QuerySet[Bookmark] = None):
             return unshare_bookmarks(bookmark_ids, request.user)
         if bulk_action == "bulk_refresh":
             return refresh_bookmarks_metadata(bookmark_ids, request.user)
+        if bulk_action == "bulk_ai_tag":
+            return ai_tag_bookmarks(bookmark_ids, request.user)
         if bulk_action == "bulk_snapshot":
             return create_html_snapshots(bookmark_ids, request.user)
 

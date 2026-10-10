@@ -22,6 +22,7 @@
       <option value="bulk_unshare">Unshare</option>
     {% endif %}
     <option value="bulk_refresh">Refresh from website</option>
+    {% if bookmark_list.ai_tagging_available %}<option value="bulk_ai_tag">Tag with AI</option>{% endif %}
     {% if bookmark_list.snapshot_feature_enabled %}<option value="bulk_snapshot">Create HTML snapshot</option>{% endif %}
   </select>
   <ld-tag-autocomplete input-name="bulk_tag_string"

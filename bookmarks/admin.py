@@ -296,6 +296,7 @@ class AdminUserProfileInline(admin.StackedInline):
     verbose_name_plural = "Profile"
     fk_name = "user"
     readonly_fields = ("search_preferences",)
+    exclude = ("ai_api_key",)
 
 
 class AdminCustomUser(UserAdmin):

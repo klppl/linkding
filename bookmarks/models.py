@@ -5,7 +5,7 @@ import os
 
 from django.conf import settings
 from django.contrib.auth.models import User
-from django.core.validators import MinValueValidator
+from django.core.validators import MaxValueValidator, MinValueValidator
 from django.db import models
 from django.db.models import Q
 from django.db.models.signals import post_delete, post_save
@@ -392,6 +392,21 @@ class UserProfile(models.Model):
         (TAG_GROUPING_ALPHABETICAL, "Alphabetical"),
         (TAG_GROUPING_DISABLED, "Disabled"),
     ]
+    AI_PROVIDER_ANTHROPIC = "anthropic"
+    AI_PROVIDER_OPENAI = "openai"
+    AI_PROVIDER_CHOICES = [
+        (AI_PROVIDER_ANTHROPIC, "Anthropic (Claude)"),
+        (AI_PROVIDER_OPENAI, "OpenAI"),
+    ]
+    AI_TAG_MODE_PREFER_EXISTING = "prefer_existing"
+    AI_TAG_MODE_EXISTING_ONLY = "existing_only"
+    AI_TAG_MODE_CHOICES = [
+        (
+            AI_TAG_MODE_PREFER_EXISTING,
+            "Prefer existing tags, create new ones if needed",
+        ),
+        (AI_TAG_MODE_EXISTING_ONLY, "Only use existing tags"),
+    ]
     user = models.OneToOneField(User, related_name="profile", on_delete=models.CASCADE)
     theme = models.CharField(
         max_length=10, choices=THEME_CHOICES, blank=False, default=THEME_AUTO
@@ -460,6 +475,28 @@ class UserProfile(models.Model):
     collapse_side_panel = models.BooleanField(default=False, null=False)
     hide_bundles = models.BooleanField(default=False, null=False)
     legacy_search = models.BooleanField(default=False, null=False)
+    enable_ai_tagging = models.BooleanField(default=False, null=False)
+    ai_provider = models.CharField(
+        max_length=20,
+        choices=AI_PROVIDER_CHOICES,
+        blank=False,
+        default=AI_PROVIDER_ANTHROPIC,
+    )
+    ai_api_key = models.CharField(max_length=512, blank=True, null=False)
+    ai_model = models.CharField(max_length=100, blank=True, null=False)
+    ai_tag_mode = models.CharField(
+        max_length=20,
+        choices=AI_TAG_MODE_CHOICES,
+        blank=False,
+        default=AI_TAG_MODE_PREFER_EXISTING,
+    )
+    ai_max_tags = models.IntegerField(
+        null=False,
+        default=3,
+        validators=[MinValueValidator(1), MaxValueValidator(10)],
+    )
+    ai_only_untagged = models.BooleanField(default=True, null=False)
+    ai_instructions = models.TextField(blank=True, null=False)
 
     def save(self, *args, **kwargs):
         if self.custom_css:

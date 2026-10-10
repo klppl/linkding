@@ -22,6 +22,7 @@ from bookmarks.widgets import (
     FormErrorList,
     FormInput,
     FormNumberInput,
+    FormPasswordInput,
     FormSelect,
     FormTextarea,
     TagAutocomplete,
@@ -337,6 +338,14 @@ class UserProfileForm(forms.ModelForm):
             "collapse_side_panel",
             "hide_bundles",
             "legacy_search",
+            "enable_ai_tagging",
+            "ai_provider",
+            "ai_api_key",
+            "ai_model",
+            "ai_tag_mode",
+            "ai_max_tags",
+            "ai_only_untagged",
+            "ai_instructions",
         ]
         widgets = {
             "theme": FormSelect,
@@ -367,7 +376,31 @@ class UserProfileForm(forms.ModelForm):
             "enable_automatic_html_snapshots": FormCheckbox,
             "default_mark_unread": FormCheckbox,
             "default_mark_shared": FormCheckbox,
+            "enable_ai_tagging": FormCheckbox,
+            "ai_provider": FormSelect,
+            "ai_api_key": FormPasswordInput,
+            "ai_model": FormInput,
+            "ai_tag_mode": FormSelect,
+            "ai_max_tags": FormNumberInput,
+            "ai_only_untagged": FormCheckbox,
+            "ai_instructions": FormTextarea,
         }
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.has_ai_api_key = bool(self.instance and self.instance.ai_api_key)
+        if self.has_ai_api_key:
+            self.fields["ai_api_key"].widget.attrs["placeholder"] = (
+                "API key is set, leave empty to keep it"
+            )
+
+    def clean_ai_api_key(self):
+        api_key = self.cleaned_data.get("ai_api_key", "").strip()
+        # The key is never rendered back into the form, so keep the stored
+        # key if the field is submitted empty, unless the user removes it
+        if not api_key and not self.data.get("remove_ai_api_key"):
+            return self.instance.ai_api_key
+        return api_key
 
 
 class GlobalSettingsForm(forms.ModelForm):

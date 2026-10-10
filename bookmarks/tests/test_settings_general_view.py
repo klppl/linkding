@@ -49,6 +49,14 @@ class SettingsGeneralViewTestCase(TestCase, BookmarkFactoryMixin):
             "collapse_side_panel": False,
             "hide_bundles": False,
             "legacy_search": False,
+            "enable_ai_tagging": False,
+            "ai_provider": UserProfile.AI_PROVIDER_ANTHROPIC,
+            "ai_api_key": "",
+            "ai_model": "",
+            "ai_tag_mode": UserProfile.AI_TAG_MODE_PREFER_EXISTING,
+            "ai_max_tags": "3",
+            "ai_only_untagged": True,
+            "ai_instructions": "",
         }
 
         return {**form_data, **overrides}
@@ -123,6 +131,14 @@ class SettingsGeneralViewTestCase(TestCase, BookmarkFactoryMixin):
             "collapse_side_panel": True,
             "hide_bundles": True,
             "legacy_search": True,
+            "enable_ai_tagging": True,
+            "ai_provider": UserProfile.AI_PROVIDER_OPENAI,
+            "ai_api_key": "sk-test",
+            "ai_model": "custom-model",
+            "ai_tag_mode": UserProfile.AI_TAG_MODE_EXISTING_ONLY,
+            "ai_max_tags": "5",
+            "ai_only_untagged": False,
+            "ai_instructions": "Use singular nouns",
         }
         response = self.client.post(
             reverse("linkding:settings.update"), form_data, follow=True
@@ -210,6 +226,77 @@ class SettingsGeneralViewTestCase(TestCase, BookmarkFactoryMixin):
         self.assertEqual(self.user.profile.legacy_search, form_data["legacy_search"])
 
         self.assertSuccessMessage(html, "Profile updated")
+
+        self.assertEqual(self.user.profile.enable_ai_tagging, True)
+        self.assertEqual(self.user.profile.ai_provider, UserProfile.AI_PROVIDER_OPENAI)
+        self.assertEqual(self.user.profile.ai_api_key, "sk-test")
+        self.assertEqual(self.user.profile.ai_model, "custom-model")
+        self.assertEqual(
+            self.user.profile.ai_tag_mode, UserProfile.AI_TAG_MODE_EXISTING_ONLY
+        )
+        self.assertEqual(self.user.profile.ai_max_tags, 5)
+        self.assertEqual(self.user.profile.ai_only_untagged, False)
+        self.assertEqual(self.user.profile.ai_instructions, "Use singular nouns")
+
+    def test_update_profile_keeps_ai_api_key_when_empty(self):
+        self.user.profile.ai_api_key = "sk-existing"
+        self.user.profile.save()
+
+        form_data = self.create_profile_form_data({"ai_api_key": ""})
+        self.client.post(reverse("linkding:settings.update"), form_data)
+        self.user.profile.refresh_from_db()
+        self.assertEqual(self.user.profile.ai_api_key, "sk-existing")
+
+        form_data = self.create_profile_form_data({"ai_api_key": "sk-new"})
+        self.client.post(reverse("linkding:settings.update"), form_data)
+        self.user.profile.refresh_from_db()
+        self.assertEqual(self.user.profile.ai_api_key, "sk-new")
+
+    def test_update_profile_removes_ai_api_key(self):
+        self.user.profile.ai_api_key = "sk-existing"
+        self.user.profile.save()
+
+        form_data = self.create_profile_form_data(
+            {"ai_api_key": "", "remove_ai_api_key": "on"}
+        )
+        self.client.post(reverse("linkding:settings.update"), form_data)
+        self.user.profile.refresh_from_db()
+        self.assertEqual(self.user.profile.ai_api_key, "")
+
+    def test_should_not_render_ai_api_key(self):
+        self.user.profile.ai_api_key = "sk-secret-key"
+        self.user.profile.save()
+
+        response = self.client.get(reverse("linkding:settings.general"))
+        html = response.content.decode()
+
+        self.assertNotIn("sk-secret-key", html)
+        self.assertIn("API key is set, leave empty to keep it", html)
+
+    def test_update_profile_validates_ai_max_tags(self):
+        form_data = self.create_profile_form_data({"ai_max_tags": "11"})
+        response = self.client.post(reverse("linkding:settings.update"), form_data)
+        self.assertEqual(response.status_code, 422)
+
+    @override_settings(LD_DISABLE_BACKGROUND_TASKS=False)
+    def test_ai_tag_untagged_bookmarks(self):
+        self.user.profile.ai_api_key = "sk-test"
+        self.user.profile.save()
+
+        with patch.object(tasks, "_ai_tag_bookmark_task") as mock_ai_tag_bookmark_task:
+            untagged = self.setup_bookmark()
+            self.setup_bookmark(tags=[self.setup_tag()])
+            response = self.client.post(
+                reverse("linkding:settings.update"),
+                {"ai_tag_untagged_bookmarks": ""},
+                follow=True,
+            )
+
+            mock_ai_tag_bookmark_task.assert_called_once_with(untagged.id)
+            self.assertSuccessMessage(
+                response.content.decode(),
+                "Queued 1 untagged bookmarks for AI tagging. This may take a while...",
+            )
 
     def test_update_profile_with_invalid_form_returns_422(self):
         form_data = self.create_profile_form_data({"items_per_page": "-1"})

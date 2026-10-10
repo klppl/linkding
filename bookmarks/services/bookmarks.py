@@ -36,6 +36,11 @@ def create_bookmark(
     # Update tag list
     _update_bookmark_tags(bookmark, tag_string, current_user)
     bookmark.save()
+    # Suggest tags with AI
+    if tasks.is_automatic_ai_tagging_active(current_user) and (
+        not current_user.profile.ai_only_untagged or not bookmark.tags.exists()
+    ):
+        tasks.ai_tag_bookmark(current_user, bookmark)
     # Create snapshot on web archive
     tasks.create_web_archive_snapshot(current_user, bookmark, False)
     # Load favicon
@@ -204,6 +209,15 @@ def refresh_bookmarks_metadata(bookmark_ids: [int | str], current_user: User):
     for bookmark in owned_bookmarks:
         tasks.refresh_metadata(bookmark)
         tasks.load_preview_image(current_user, bookmark)
+
+
+def ai_tag_bookmarks(bookmark_ids: list[int | str], current_user: User):
+    sanitized_bookmark_ids = _sanitize_id_list(bookmark_ids)
+    owned_bookmarks = Bookmark.objects.filter(
+        owner=current_user, id__in=sanitized_bookmark_ids
+    )
+
+    tasks.ai_tag_bookmarks(current_user, owned_bookmarks)
 
 
 def create_html_snapshots(bookmark_ids: list[int | str], current_user: User):

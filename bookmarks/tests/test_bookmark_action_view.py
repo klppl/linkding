@@ -332,6 +332,25 @@ class BookmarkActionViewTestCase(
         self.assertTrue(Bookmark.objects.get(id=bookmark2.id).is_archived)
         self.assertTrue(Bookmark.objects.get(id=bookmark3.id).is_archived)
 
+    def test_bulk_ai_tag(self):
+        bookmark1 = self.setup_bookmark()
+        bookmark2 = self.setup_bookmark()
+
+        with patch.object(tasks, "ai_tag_bookmarks") as mock_ai_tag_bookmarks:
+            self.client.post(
+                reverse("linkding:bookmarks.index.action"),
+                {
+                    "bulk_action": ["bulk_ai_tag"],
+                    "bulk_execute": [""],
+                    "bookmark_id": [str(bookmark1.id), str(bookmark2.id)],
+                },
+            )
+
+            mock_ai_tag_bookmarks.assert_called_once()
+            self.assertCountEqual(
+                mock_ai_tag_bookmarks.call_args[0][1], [bookmark1, bookmark2]
+            )
+
     def test_can_only_bulk_archive_own_bookmarks(self):
         other_user = User.objects.create_user(
             "otheruser", "otheruser@example.com", "password123"

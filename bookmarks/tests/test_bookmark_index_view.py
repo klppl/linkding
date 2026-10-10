@@ -389,6 +389,31 @@ class BookmarkIndexViewTestCase(
             html,
         )
 
+    def test_allowed_bulk_actions_with_ai_tagging_configured(self):
+        user_profile = self.user.profile
+        user_profile.ai_api_key = "test-key"
+        user_profile.save()
+
+        url = reverse("linkding:bookmarks.index")
+        response = self.client.get(url)
+        html = response.content.decode()
+
+        self.assertInHTML(
+            """
+          <select name="bulk_action" class="form-select select-sm">
+            <option value="bulk_archive">Archive</option>
+            <option value="bulk_delete">Delete</option>
+            <option value="bulk_tag">Add tags</option>
+            <option value="bulk_untag">Remove tags</option>
+            <option value="bulk_read">Mark as read</option>
+            <option value="bulk_unread">Mark as unread</option>
+            <option value="bulk_refresh">Refresh from website</option>
+            <option value="bulk_ai_tag">Tag with AI</option>
+          </select>
+        """,
+            html,
+        )
+
     def test_apply_search_preferences(self):
         # no params
         response = self.client.post(reverse("linkding:bookmarks.index"))

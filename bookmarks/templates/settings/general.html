@@ -19,6 +19,13 @@
             novalidate
             data-turbo="false">
         {% csrf_token %}
+        {# Default button, so that pressing enter in a field saves the profile instead of triggering another action #}
+        <input type="submit"
+               name="update_profile"
+               value="Save"
+               class="text-assistive"
+               tabindex="-1"
+               aria-hidden="true">
         <div class="form-group">
           {% formlabel form.theme "Theme" %}
           {% formfield form.theme has_help=True class="width-25 width-sm-100" %}
@@ -147,6 +154,85 @@
             <pre>youtube.com video
 reddit.com/r/Music music reddit</pre>
           {% endformhelp %}
+        </div>
+        <div class="form-group">
+          <details {% if form.enable_ai_tagging.value or form.has_ai_api_key or form.errors %}open{% endif %}>
+            <summary>
+              <span class="form-label d-inline-block">AI Tagging</span>
+            </summary>
+            <p class="text-gray text-small">
+              Uses an AI model to suggest tags for your bookmarks based on their URL, title and description.
+              Bring your own API key from <a href="https://console.anthropic.com/" target="_blank" rel="noopener">Anthropic</a>
+              or <a href="https://platform.openai.com/" target="_blank" rel="noopener">OpenAI</a>.
+              The URL, title and description of tagged bookmarks, as well as the names of your existing tags,
+              are sent to the selected provider. AI tags are only ever added, existing tags are never removed.
+            </p>
+            <div class="form-group">
+              {% formlabel form.ai_provider "Provider" %}
+              {% formfield form.ai_provider has_help=True class="width-25 width-sm-100" %}
+              {% formhelp form.ai_provider %}
+                The AI provider to send requests to.
+              {% endformhelp %}
+            </div>
+            <div class="form-group">
+              {% formlabel form.ai_api_key "API key" %}
+              {% formfield form.ai_api_key has_help=True class="width-50 width-sm-100" %}
+              {% formhelp form.ai_api_key %}
+                The API key for the selected provider. The key is stored in the linkding database and never displayed again.
+                {% if form.has_ai_api_key %}
+                  <label class="form-checkbox mt-1">
+                    <input type="checkbox" name="remove_ai_api_key">
+                    <i class="form-icon"></i> Remove stored API key
+                  </label>
+                {% endif %}
+              {% endformhelp %}
+            </div>
+            <div class="form-group">
+              {% formlabel form.ai_model "Model" %}
+              {% formfield form.ai_model has_help=True class="width-25 width-sm-100" placeholder="Default" %}
+              {% formhelp form.ai_model %}
+                Leave empty to use the cheapest recommended model of the provider:
+                <code>{{ ai_default_models.anthropic }}</code> for Anthropic, <code>{{ ai_default_models.openai }}</code> for OpenAI.
+              {% endformhelp %}
+            </div>
+            <div class="form-group">
+              {% formlabel form.ai_tag_mode "Tag selection" %}
+              {% formfield form.ai_tag_mode has_help=True class="width-50 width-sm-100" %}
+              {% formhelp form.ai_tag_mode %}
+                Whether the AI may create new tags, or must only pick from tags you already use.
+              {% endformhelp %}
+            </div>
+            <div class="form-group">
+              {% formlabel form.ai_max_tags "Maximum number of tags" %}
+              {% formfield form.ai_max_tags has_help=True min="1" max="10" class="width-25 width-sm-100" %}
+              {% formhelp form.ai_max_tags %}
+                The maximum number of tags the AI adds to a bookmark (1-10).
+              {% endformhelp %}
+            </div>
+            <div class="form-group">
+              <label for="{{ form.ai_instructions.id_for_label }}" class="form-label">Custom instructions</label>
+              {% formfield form.ai_instructions has_help=True rows="4" placeholder="e.g. Use singular nouns. Always add a 'video' tag for video sites. Prefer broad categories over specific ones." %}
+              {% formhelp form.ai_instructions %}
+                Optional instructions on how bookmarks should be tagged. These are added to the prompt sent to the AI.
+              {% endformhelp %}
+            </div>
+            <div class="form-group">
+              {% formfield form.enable_ai_tagging label="Automatically tag new bookmarks with AI" has_help=True %}
+              {% formhelp form.enable_ai_tagging %}
+                Suggests tags in the background whenever a new bookmark is added.
+                Existing bookmarks can be tagged using the "Tag with AI" bulk action in the bookmark list.
+              {% endformhelp %}
+            </div>
+            <div class="form-group">
+              {% formfield form.ai_only_untagged label="Only tag bookmarks without tags" has_help=True %}
+              {% formhelp form.ai_only_untagged %}
+                When enabled, new bookmarks that already have tags (added manually or by auto tagging rules) are skipped.
+              {% endformhelp %}
+            </div>
+            {% if ai_tagging_available %}
+              <button class="btn" name="ai_tag_untagged_bookmarks">Tag all untagged bookmarks with AI</button>
+            {% endif %}
+          </details>
         </div>
         <div class="form-group">
           {% formfield form.enable_favicons label="Enable Favicons" has_help=True %}

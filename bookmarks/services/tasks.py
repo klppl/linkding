@@ -11,7 +11,13 @@ from huey.exceptions import TaskLockedException
 from waybackpy.exceptions import TooManyRequestsError, WaybackError
 
 from bookmarks.models import Bookmark, BookmarkAsset, UserProfile
-from bookmarks.services import assets, favicon_loader, preview_image_loader
+from bookmarks.services import (
+    ai_tagging,
+    assets,
+    favicon_loader,
+    preview_image_loader,
+)
+from bookmarks.services.tags import get_or_create_tags
 from bookmarks.services.website_loader import DEFAULT_USER_AGENT, load_website_metadata
 
 logger = logging.getLogger(__name__)
@@ -241,6 +247,83 @@ def _refresh_metadata_task(bookmark_id: int):
 
     bookmark.save()
     logger.info(f"Successfully refreshed metadata for bookmark. url={bookmark.url}")
+
+
+def is_ai_tagging_available(user: User) -> bool:
+    background_tasks_enabled = not settings.LD_DISABLE_BACKGROUND_TASKS
+    return background_tasks_enabled and ai_tagging.is_configured(user.profile)
+
+
+def is_automatic_ai_tagging_active(user: User) -> bool:
+    return is_ai_tagging_available(user) and user.profile.enable_ai_tagging
+
+
+def ai_tag_bookmark(user: User, bookmark: Bookmark):
+    if is_ai_tagging_available(user):
+        _ai_tag_bookmark_task(bookmark.id)
+
+
+def ai_tag_bookmarks(user: User, bookmarks) -> int:
+    if not is_ai_tagging_available(user):
+        return 0
+    count = 0
+    for bookmark in bookmarks:
+        _ai_tag_bookmark_task(bookmark.id)
+        count += 1
+    return count
+
+
+def schedule_ai_tag_untagged_bookmarks(user: User) -> int:
+    untagged_bookmarks = Bookmark.objects.filter(owner=user, tags__isnull=True).only(
+        "id"
+    )
+    return ai_tag_bookmarks(user, untagged_bookmarks)
+
+
+@task(retries=2)
+def _ai_tag_bookmark_task(bookmark_id: int):
+    try:
+        bookmark = Bookmark.objects.select_related("owner__profile").get(id=bookmark_id)
+    except Bookmark.DoesNotExist:
+        return
+
+    profile = bookmark.owner.profile
+    if not ai_tagging.is_configured(profile):
+        return
+
+    logger.info(f"Suggest tags with AI for bookmark. url={bookmark.url}")
+
+    # Use website metadata if the bookmark itself has no title or description
+    if not bookmark.title and not bookmark.description:
+        try:
+            metadata = load_website_metadata(bookmark.url)
+            bookmark.title = metadata.title or ""
+            bookmark.description = metadata.description or ""
+        except Exception as exc:
+            logger.warning(
+                f"Failed to load website metadata for AI tagging. url={bookmark.url}",
+                exc_info=exc,
+            )
+
+    try:
+        tag_names = ai_tagging.suggest_tags(
+            bookmark, ai_tagging.AiTaggingSettings.from_profile(profile)
+        )
+    except ai_tagging.AiTaggingError as exc:
+        # Configuration errors, don't retry
+        logger.error(f"Failed to tag bookmark with AI. url={bookmark.url}: {exc}")
+        return
+
+    if not tag_names:
+        logger.info(f"AI did not suggest any tags for bookmark. url={bookmark.url}")
+        return
+
+    # Only add tags, never remove existing ones
+    tags = get_or_create_tags(tag_names, bookmark.owner)
+    bookmark.tags.add(*tags)
+    logger.info(
+        f"Successfully tagged bookmark with AI. url={bookmark.url} tags={tag_names}"
+    )
 
 
 def is_html_snapshot_feature_active() -> bool:

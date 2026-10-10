@@ -16,6 +16,14 @@ class FormInput(forms.TextInput):
         super().__init__(default_attrs)
 
 
+class FormPasswordInput(forms.PasswordInput):
+    def __init__(self, attrs=None):
+        default_attrs = {"class": "form-input", "autocomplete": "off"}
+        if attrs:
+            default_attrs.update(attrs)
+        super().__init__(default_attrs, render_value=False)
+
+
 class FormNumberInput(forms.NumberInput):
     def __init__(self, attrs=None):
         default_attrs = {"class": "form-input"}

@@ -18,6 +18,7 @@ from bookmarks.models import (
     User,
     UserProfile,
 )
+from bookmarks.services import ai_tagging
 from bookmarks.services.search_query_parser import (
     OrExpression,
     SearchQueryParseError,
@@ -239,6 +240,10 @@ class BookmarkListContext:
         self.collapse_side_panel = user_profile.collapse_side_panel
         self.is_preview = False
         self.snapshot_feature_enabled = settings.LD_ENABLE_SNAPSHOTS
+        self.ai_tagging_available = (
+            not settings.LD_DISABLE_BACKGROUND_TASKS
+            and ai_tagging.is_configured(user_profile)
+        )
 
     @staticmethod
     def generate_return_url(search: BookmarkSearch, base_url: str, page: int = None):

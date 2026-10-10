@@ -20,7 +20,7 @@ from bookmarks.models import (
     FeedToken,
     GlobalSettings,
 )
-from bookmarks.services import exporter, importer, tasks
+from bookmarks.services import ai_tagging, exporter, importer, tasks
 from bookmarks.type_defs import HttpRequest
 from bookmarks.utils import app_version
 from bookmarks.views import access
@@ -56,6 +56,8 @@ def general(request: HttpRequest, status=200, context_overrides=None):
             "global_settings_form": global_settings_form,
             "enable_refresh_favicons": enable_refresh_favicons,
             "has_snapshot_support": has_snapshot_support,
+            "ai_default_models": ai_tagging.DEFAULT_MODELS,
+            "ai_tagging_available": tasks.is_ai_tagging_available(request.user),
             "success_message": success_message,
             "error_message": error_message,
             "version_info": version_info,
@@ -82,6 +84,20 @@ def update(request: HttpRequest):
                 "Scheduled favicon update. This may take a while...",
                 "settings_success_message",
             )
+        if "ai_tag_untagged_bookmarks" in request.POST:
+            count = tasks.schedule_ai_tag_untagged_bookmarks(request.user)
+            if count > 0:
+                messages.success(
+                    request,
+                    f"Queued {count} untagged bookmarks for AI tagging. This may take a while...",
+                    "settings_success_message",
+                )
+            else:
+                messages.success(
+                    request,
+                    "No untagged bookmarks found.",
+                    "settings_success_message",
+                )
         if "create_missing_html_snapshots" in request.POST:
             count = tasks.create_missing_html_snapshots(request.user)
             if count > 0:
