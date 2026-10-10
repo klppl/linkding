@@ -25,6 +25,21 @@ DEFAULT_MODELS = {
     UserProfile.AI_PROVIDER_OPENAI: "gpt-5.4-nano",
 }
 
+# Models offered in the settings dropdown, cheapest first. Any other model can
+# be entered as a custom model.
+MODEL_PRESETS = {
+    UserProfile.AI_PROVIDER_ANTHROPIC: [
+        "claude-haiku-5-5",
+        "claude-haiku-4-5",
+        "claude-sonnet-5-5",
+    ],
+    UserProfile.AI_PROVIDER_OPENAI: [
+        "gpt-5.4-nano",
+        "gpt-5-nano",
+        "gpt-5-mini",
+    ],
+}
+
 REQUEST_TIMEOUT = 60
 # Limit the number of existing tags sent to the model to keep prompts small
 MAX_EXISTING_TAGS = 500

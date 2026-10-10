@@ -14,6 +14,7 @@ from bookmarks.models import (
     parse_tag_string,
     sanitize_tag_name,
 )
+from bookmarks.services import ai_tagging
 from bookmarks.services.bookmarks import create_bookmark, update_bookmark
 from bookmarks.type_defs import HttpRequest
 from bookmarks.validators import BookmarkURLValidator
@@ -386,8 +387,33 @@ class UserProfileForm(forms.ModelForm):
             "ai_instructions": FormTextarea,
         }
 
+    AI_MODEL_DEFAULT = ""
+    AI_MODEL_CUSTOM = "custom"
+
+    ai_model_preset = forms.ChoiceField(required=False, widget=FormSelect)
+
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
+        self.fields["ai_model_preset"].choices = [
+            (self.AI_MODEL_DEFAULT, "Default (cheapest model of the provider)"),
+            *[
+                (label, [(model, model) for model in ai_tagging.MODEL_PRESETS[value]])
+                for value, label in UserProfile.AI_PROVIDER_CHOICES
+            ],
+            (self.AI_MODEL_CUSTOM, "Custom model..."),
+        ]
+        # Select the preset matching the stored model, otherwise show the
+        # stored model in the custom model field
+        if not self.is_bound:
+            stored_model = self.instance.ai_model if self.instance else ""
+            if not stored_model:
+                self.initial["ai_model_preset"] = self.AI_MODEL_DEFAULT
+            elif self._find_preset_provider(stored_model):
+                self.initial["ai_model_preset"] = stored_model
+                self.initial["ai_model"] = ""
+            else:
+                self.initial["ai_model_preset"] = self.AI_MODEL_CUSTOM
+
         self.has_ai_api_key = bool(self.instance and self.instance.ai_api_key)
         if self.has_ai_api_key:
             self.fields["ai_api_key"].widget.attrs["placeholder"] = (
@@ -401,6 +427,36 @@ class UserProfileForm(forms.ModelForm):
         if not api_key and not self.data.get("remove_ai_api_key"):
             return self.instance.ai_api_key
         return api_key
+
+    def clean(self):
+        cleaned_data = super().clean()
+        preset = cleaned_data.get("ai_model_preset") or self.AI_MODEL_DEFAULT
+        custom_model = (cleaned_data.get("ai_model") or "").strip()
+
+        if preset == self.AI_MODEL_CUSTOM:
+            if not custom_model:
+                self.add_error("ai_model", "Enter a model name or select a model.")
+            cleaned_data["ai_model"] = custom_model
+        elif preset == self.AI_MODEL_DEFAULT:
+            cleaned_data["ai_model"] = ""
+        else:
+            preset_provider = self._find_preset_provider(preset)
+            provider = cleaned_data.get("ai_provider")
+            if provider and preset_provider != provider:
+                self.add_error(
+                    "ai_model_preset",
+                    "The selected model is not available for the selected provider.",
+                )
+            cleaned_data["ai_model"] = preset
+
+        return cleaned_data
+
+    @staticmethod
+    def _find_preset_provider(model: str):
+        for provider, preset_models in ai_tagging.MODEL_PRESETS.items():
+            if model in preset_models:
+                return provider
+        return None
 
 
 class GlobalSettingsForm(forms.ModelForm):

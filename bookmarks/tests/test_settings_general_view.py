@@ -52,6 +52,7 @@ class SettingsGeneralViewTestCase(TestCase, BookmarkFactoryMixin):
             "enable_ai_tagging": False,
             "ai_provider": UserProfile.AI_PROVIDER_ANTHROPIC,
             "ai_api_key": "",
+            "ai_model_preset": "",
             "ai_model": "",
             "ai_tag_mode": UserProfile.AI_TAG_MODE_PREFER_EXISTING,
             "ai_max_tags": "3",
@@ -134,6 +135,7 @@ class SettingsGeneralViewTestCase(TestCase, BookmarkFactoryMixin):
             "enable_ai_tagging": True,
             "ai_provider": UserProfile.AI_PROVIDER_OPENAI,
             "ai_api_key": "sk-test",
+            "ai_model_preset": "custom",
             "ai_model": "custom-model",
             "ai_tag_mode": UserProfile.AI_TAG_MODE_EXISTING_ONLY,
             "ai_max_tags": "5",
@@ -237,6 +239,75 @@ class SettingsGeneralViewTestCase(TestCase, BookmarkFactoryMixin):
         self.assertEqual(self.user.profile.ai_max_tags, 5)
         self.assertEqual(self.user.profile.ai_only_untagged, False)
         self.assertEqual(self.user.profile.ai_instructions, "Use singular nouns")
+
+    def test_update_profile_ai_model_presets(self):
+        # Default
+        form_data = self.create_profile_form_data(
+            {"ai_model_preset": "", "ai_model": "ignored"}
+        )
+        self.client.post(reverse("linkding:settings.update"), form_data)
+        self.user.profile.refresh_from_db()
+        self.assertEqual(self.user.profile.ai_model, "")
+
+        # Preset
+        form_data = self.create_profile_form_data(
+            {"ai_model_preset": "claude-sonnet-5-5", "ai_model": "ignored"}
+        )
+        self.client.post(reverse("linkding:settings.update"), form_data)
+        self.user.profile.refresh_from_db()
+        self.assertEqual(self.user.profile.ai_model, "claude-sonnet-5-5")
+
+        # Custom
+        form_data = self.create_profile_form_data(
+            {"ai_model_preset": "custom", "ai_model": " my-model "}
+        )
+        self.client.post(reverse("linkding:settings.update"), form_data)
+        self.user.profile.refresh_from_db()
+        self.assertEqual(self.user.profile.ai_model, "my-model")
+
+    def test_update_profile_requires_custom_model_name(self):
+        form_data = self.create_profile_form_data(
+            {"ai_model_preset": "custom", "ai_model": ""}
+        )
+        response = self.client.post(reverse("linkding:settings.update"), form_data)
+        self.assertEqual(response.status_code, 422)
+
+    def test_update_profile_rejects_preset_of_other_provider(self):
+        form_data = self.create_profile_form_data(
+            {
+                "ai_provider": UserProfile.AI_PROVIDER_ANTHROPIC,
+                "ai_model_preset": "gpt-5.4-nano",
+            }
+        )
+        response = self.client.post(reverse("linkding:settings.update"), form_data)
+        self.assertEqual(response.status_code, 422)
+
+    def test_update_profile_rejects_unknown_preset(self):
+        form_data = self.create_profile_form_data({"ai_model_preset": "unknown"})
+        response = self.client.post(reverse("linkding:settings.update"), form_data)
+        self.assertEqual(response.status_code, 422)
+
+    def test_should_render_ai_model_preset(self):
+        self.user.profile.ai_model = "gpt-5-nano"
+        self.user.profile.save()
+        html = self.client.get(reverse("linkding:settings.general")).content.decode()
+        self.assertInHTML(
+            '<option value="gpt-5-nano" selected>gpt-5-nano</option>', html
+        )
+        self.assertInHTML(
+            '<input type="text" name="ai_model" class="form-input width-50 width-sm-100" autocomplete="off" maxlength="100" '
+            'placeholder="e.g. claude-sonnet-5" aria-describedby="id_ai_model_help" id="id_ai_model">',
+            html,
+        )
+
+    def test_should_render_custom_ai_model(self):
+        self.user.profile.ai_model = "my-model"
+        self.user.profile.save()
+        html = self.client.get(reverse("linkding:settings.general")).content.decode()
+        self.assertInHTML(
+            '<option value="custom" selected>Custom model...</option>', html
+        )
+        self.assertIn('value="my-model"', html)
 
     def test_update_profile_keeps_ai_api_key_when_empty(self):
         self.user.profile.ai_api_key = "sk-existing"
