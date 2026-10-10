@@ -26,6 +26,37 @@ Tagging runs in the background and only adds tags, it never removes them. The UR
 each bookmark, and the names of your existing tags, are sent to the selected provider. The API key is stored
 in plain text in the linkding database.
 
+### Dead link and duplicate cleanup
+
+linkding already prevents saving the exact same URL twice. [`scripts/link_checker.py`](scripts/link_checker.py)
+goes further, and is meant to be run periodically (e.g. weekly from cron) to keep a large collection healthy.
+It uses the REST API, needs only Python 3.10+ (no dependencies), and never deletes anything. Instead it tags:
+
+- **`dead-link`:** the page returns 404 or 410, or its domain no longer exists.
+- **`duplicate`:** the URL points to the same page as another bookmark, ignoring http/https, `www.`,
+  trailing slashes, `#fragments` and tracking parameters like `utm_*` and `fbclid`.
+
+Search for `#dead-link` or `#duplicate` in linkding to review and clean up. Tags are removed again once a link
+works or the duplicate is gone. Timeouts, server errors, 403s and similar are often temporary or caused by bot
+protection, so they are only reported, never tagged. If DNS isn't working when the script runs, unknown domains
+aren't tagged either.
+
+Create an API token under **Settings → Integrations**, then:
+
+```
+LD_URL=https://linkding.example.com LD_TOKEN=<token> python3 scripts/link_checker.py --dry-run
+```
+
+`--dry-run` only reports. Other options: `--skip-archived`, `--no-dead-links`, `--no-duplicates`,
+`--dead-tag`/`--duplicate-tag` to use other tag names, `--workers`, `--timeout`, `--verbose` and `--quiet`
+(see `--help`). Note that tagging a bookmark through the API updates its "date modified".
+
+Example crontab entry (Sundays at 04:00), running inside the linkding container:
+
+```
+0 4 * * 0 docker exec -e LD_TOKEN=<token> linkding python scripts/link_checker.py --url http://localhost:9090 --quiet
+```
+
 ## Running this fork
 
 The official Docker images (`sissbruecker/linkding`) do **not** include these changes. Build your own image:

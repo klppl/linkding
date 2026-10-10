@@ -11,6 +11,7 @@
 !/package-lock.json
 !/pyproject.toml
 !/scripts/setup-ublock.sh
+!/scripts/link_checker.py
 !/supervisord-tasks.conf
 !/supervisord-all.conf
 !/uv.lock
