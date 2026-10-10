@@ -25,6 +25,7 @@ Run with --help for all options.
 
 import argparse
 import concurrent.futures
+import importlib.util
 import json
 import os
 import socket
@@ -34,6 +35,20 @@ import urllib.parse
 import urllib.request
 from collections import defaultdict
 from dataclasses import dataclass
+from pathlib import Path
+
+
+def _load_notify():
+    # Load notify.py from this folder, independent of the current directory
+    path = Path(__file__).resolve().with_name("notify.py")
+    spec = importlib.util.spec_from_file_location("linkding_notify", path)
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
+notify = _load_notify()
 
 USER_AGENT = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
@@ -249,6 +264,9 @@ def run(args, api: LinkdingApi, out=sys.stdout) -> int:
 
     # Apply tag changes, only for bookmarks that actually change
     updated = 0
+    # Problems that were not tagged before, used for notifications
+    new_dead = []
+    new_duplicates = []
     for bookmark in bookmarks:
         current = bookmark["tag_names"]
         current_lower = {tag.lower() for tag in current}
@@ -257,6 +275,10 @@ def run(args, api: LinkdingApi, out=sys.stdout) -> int:
         new_tags = [t for t in current if t.lower() not in to_remove] + sorted(to_add)
         if new_tags == current:
             continue
+        if args.dead_tag in to_add:
+            new_dead.append(bookmark)
+        if args.duplicate_tag in to_add:
+            new_duplicates.append(bookmark)
         updated += 1
         if not args.dry_run:
             api.set_tags(bookmark["id"], new_tags)
@@ -279,7 +301,61 @@ def run(args, api: LinkdingApi, out=sys.stdout) -> int:
         f"\nSummary: {len(dead)} dead, {len(errors)} could not be checked, "
         f"{len(duplicate_groups)} duplicate groups, {updated} bookmarks {action}"
     )
+
+    if args.notify and (new_dead or new_duplicates or args.notify_always):
+        notification = build_notification(
+            args, new_dead, new_duplicates, len(dead), len(duplicate_groups)
+        )
+        if args.dry_run:
+            log(
+                f"\nWould send notification:\n{notification.title}\n{notification.message}"
+            )
+        else:
+            errors = notify.send_all(args.notify, notification)
+            for error in errors:
+                print(error, file=sys.stderr)
+            if errors:
+                return 1
     return 0
+
+
+def build_notification(args, new_dead, new_duplicates, dead_total, duplicate_total):
+    max_listed = 10
+    lines = []
+    if new_dead:
+        lines.append(f"New dead links ({len(new_dead)}):")
+        lines += [f"• {b.get('title') or b['url']}" for b in new_dead[:max_listed]]
+        if len(new_dead) > max_listed:
+            lines.append(f"…and {len(new_dead) - max_listed} more")
+    if new_duplicates:
+        if lines:
+            lines.append("")
+        lines.append(f"New duplicates ({len(new_duplicates)}):")
+        lines += [f"• {b['url']}" for b in new_duplicates[:max_listed]]
+        if len(new_duplicates) > max_listed:
+            lines.append(f"…and {len(new_duplicates) - max_listed} more")
+    if not lines:
+        lines.append("No new problems found.")
+    lines.append("")
+    lines.append(
+        f"In total: {dead_total} dead links, {duplicate_total} groups of duplicates"
+    )
+
+    if new_dead or new_duplicates:
+        parts = []
+        if new_dead:
+            parts.append(f"{len(new_dead)} new dead links")
+        if new_duplicates:
+            parts.append(f"{len(new_duplicates)} new duplicates")
+        title = "linkding: " + ", ".join(parts)
+    else:
+        title = "linkding: link check finished"
+
+    # Link to a search for the tagged bookmarks
+    tag = args.dead_tag if new_dead or not new_duplicates else args.duplicate_tag
+    query = urllib.parse.urlencode({"q": f"#{tag}"})
+    url = f"{args.url.rstrip('/')}/bookmarks?{query}"
+    return notify.Notification(title, "\n".join(lines), url)
 
 
 def parse_args(argv=None):
@@ -317,9 +393,23 @@ def parse_args(argv=None):
         help="also list links that could not be checked",
     )
     parser.add_argument("--quiet", action="store_true", help="no output")
+    parser.add_argument(
+        "--notify",
+        action="append",
+        default=None,
+        help="send a notification when new problems are found, see notify.py for "
+        "supported targets. Can be repeated (env: LD_NOTIFY, space separated)",
+    )
+    parser.add_argument(
+        "--notify-always",
+        action="store_true",
+        help="send a notification after every run, even without new problems",
+    )
     args = parser.parse_args(argv)
     if not args.url or not args.token:
         parser.error("--url and --token (or LD_URL and LD_TOKEN) are required")
+    if args.notify is None:
+        args.notify = notify.parse_targets(os.getenv("LD_NOTIFY"))
     return args
 
 

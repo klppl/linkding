@@ -57,6 +57,37 @@ Example crontab entry (Sundays at 04:00), running inside the linkding container:
 0 4 * * 0 docker exec -e LD_TOKEN=<token> linkding python scripts/link_checker.py --url http://localhost:9090 --quiet
 ```
 
+Add `--notify <target>` to get a notification when a run finds new dead links or duplicates (see below).
+Problems that were already tagged don't notify again. `--notify-always` sends a summary after every run.
+
+### Notifications (ntfy, Discord, Slack, Gotify, Telegram, webhooks)
+
+[`scripts/new_bookmarks_notifier.py`](scripts/new_bookmarks_notifier.py) sends a notification when new bookmarks
+are added, and the link checker can notify about problems it finds. Both use
+[`scripts/notify.py`](scripts/notify.py), which supports these targets:
+
+| Service | Target URL |
+| --- | --- |
+| ntfy | `https://ntfy.sh/<topic>` or `ntfy+https://ntfy.example.com/<topic>`, with optional `<access token>@` or `<user>:<password>@` before the host |
+| Discord | `https://discord.com/api/webhooks/<id>/<token>` |
+| Slack | `https://hooks.slack.com/services/...` |
+| Mattermost and other Slack-compatible hooks | `slack+https://mattermost.example.com/hooks/...` |
+| Gotify | `gotify+https://gotify.example.com/message?token=<app token>` |
+| Telegram | `telegram://<bot token>/<chat id>` |
+| Any webhook | `json+https://example.com/hook` (POSTs `{"title", "message", "url"}`) |
+
+Test a target with `python3 scripts/notify.py <target> "Hello"`. Targets are passed with `--notify` (repeatable) or
+in `LD_NOTIFY`, separated by spaces. The new bookmark notifier remembers what it already announced in a state file.
+Its first run only creates that file, so you aren't notified about your existing bookmarks. Bookmarks imported
+with an older date aren't announced. For example, checking every 10 minutes inside the container:
+
+```
+*/10 * * * * docker exec -e LD_TOKEN=<token> -e LD_NOTIFY="ntfy+https://ntfy.example.com/linkding" -e LD_NOTIFIER_STATE=/etc/linkding/data/notifier-state.json linkding python scripts/new_bookmarks_notifier.py --url http://localhost:9090 --quiet
+```
+
+A single new bookmark is sent with its title, URL, description and tags, and clicking it opens the page.
+Several new bookmarks are sent as one summary.
+
 ## Running this fork
 
 The official Docker images (`sissbruecker/linkding`) do **not** include these changes. Build your own image:
