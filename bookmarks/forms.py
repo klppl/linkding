@@ -14,7 +14,7 @@ from bookmarks.models import (
     parse_tag_string,
     sanitize_tag_name,
 )
-from bookmarks.services import ai_tagging
+from bookmarks.services import ai_tagging, notifications
 from bookmarks.services.bookmarks import create_bookmark, update_bookmark
 from bookmarks.type_defs import HttpRequest
 from bookmarks.validators import BookmarkURLValidator
@@ -347,6 +347,10 @@ class UserProfileForm(forms.ModelForm):
             "ai_max_tags",
             "ai_only_untagged",
             "ai_instructions",
+            "notification_targets",
+            "notify_new_bookmarks",
+            "notify_link_check",
+            "link_check_interval",
         ]
         widgets = {
             "theme": FormSelect,
@@ -385,6 +389,10 @@ class UserProfileForm(forms.ModelForm):
             "ai_max_tags": FormNumberInput,
             "ai_only_untagged": FormCheckbox,
             "ai_instructions": FormTextarea,
+            "notification_targets": FormTextarea,
+            "notify_new_bookmarks": FormCheckbox,
+            "notify_link_check": FormCheckbox,
+            "link_check_interval": FormSelect,
         }
 
     AI_MODEL_DEFAULT = ""
@@ -427,6 +435,18 @@ class UserProfileForm(forms.ModelForm):
         if not api_key and not self.data.get("remove_ai_api_key"):
             return self.instance.ai_api_key
         return api_key
+
+    def clean_notification_targets(self):
+        value = self.cleaned_data.get("notification_targets", "")
+        errors = []
+        for target in notifications.parse_targets(value):
+            try:
+                notifications.validate_target(target)
+            except notifications.NotifyError as e:
+                errors.append(str(e))
+        if errors:
+            raise forms.ValidationError(errors)
+        return value.strip()
 
     def clean(self):
         cleaned_data = super().clean()

@@ -28,43 +28,27 @@ in plain text in the linkding database.
 
 ### Dead link and duplicate cleanup
 
-linkding already prevents saving the exact same URL twice. [`scripts/link_checker.py`](scripts/link_checker.py)
-goes further, and is meant to be run periodically (e.g. weekly from cron) to keep a large collection healthy.
-It uses the REST API, needs only Python 3.10+ (no dependencies), and never deletes anything. Instead it tags:
+linkding already prevents saving the exact same URL twice. This fork adds a link check that runs in the background,
+set up under **Settings → General → Link check** (daily, weekly or monthly, or "Run link check now").
+Nothing is ever deleted. Instead, bookmarks are tagged so you can review them by searching for the tag:
 
-- **`dead-link`:** the page returns 404 or 410, or its domain no longer exists.
-- **`duplicate`:** the URL points to the same page as another bookmark, ignoring http/https, `www.`,
+- **`#dead-link`:** the page returns 404 or 410, or its domain no longer exists.
+- **`#duplicate`:** the URL points to the same page as another bookmark, ignoring http/https, `www.`,
   trailing slashes, `#fragments` and tracking parameters like `utm_*` and `fbclid`.
 
-Search for `#dead-link` or `#duplicate` in linkding to review and clean up. Tags are removed again once a link
-works or the duplicate is gone. Timeouts, server errors, 403s and similar are often temporary or caused by bot
-protection, so they are only reported, never tagged. If DNS isn't working when the script runs, unknown domains
-aren't tagged either.
-
-Create an API token under **Settings → Integrations**, then:
-
-```
-LD_URL=https://linkding.example.com LD_TOKEN=<token> python3 scripts/link_checker.py --dry-run
-```
-
-`--dry-run` only reports. Other options: `--skip-archived`, `--no-dead-links`, `--no-duplicates`,
-`--dead-tag`/`--duplicate-tag` to use other tag names, `--workers`, `--timeout`, `--verbose` and `--quiet`
-(see `--help`). Note that tagging a bookmark through the API updates its "date modified".
-
-Example crontab entry (Sundays at 04:00), running inside the linkding container:
-
-```
-0 4 * * 0 docker exec -e LD_TOKEN=<token> linkding python scripts/link_checker.py --url http://localhost:9090 --quiet
-```
-
-Add `--notify <target>` to get a notification when a run finds new dead links or duplicates (see below).
-Problems that were already tagged don't notify again. `--notify-always` sends a summary after every run.
+Tags are removed again once a link works or the duplicate is gone. Timeouts, server errors, 403s and similar are
+often temporary or caused by bot protection, so they never change the tags. If DNS isn't working during a check,
+unknown domains aren't tagged either.
 
 ### Notifications (ntfy, Discord, Slack, Gotify, Telegram, webhooks)
 
-[`scripts/new_bookmarks_notifier.py`](scripts/new_bookmarks_notifier.py) sends a notification when new bookmarks
-are added, and the link checker can notify about problems it finds. Both use
-[`scripts/notify.py`](scripts/notify.py), which supports these targets:
+Under **Settings → General → Notifications**, add one or more targets (one URL per line) and choose what to be
+notified about:
+
+- **New bookmarks:** sent about a minute after a bookmark is added, so its title and tags (including AI tags) are
+  included. Clicking the notification opens the page. Imported bookmarks don't send notifications.
+- **Link check problems:** sent when the link check finds new dead links or duplicates. Problems that are already
+  tagged don't notify again.
 
 | Service | Target URL |
 | --- | --- |
@@ -76,17 +60,13 @@ are added, and the link checker can notify about problems it finds. Both use
 | Telegram | `telegram://<bot token>/<chat id>` |
 | Any webhook | `json+https://example.com/hook` (POSTs `{"title", "message", "url"}`) |
 
-Test a target with `python3 scripts/notify.py <target> "Hello"`. Targets are passed with `--notify` (repeatable) or
-in `LD_NOTIFY`, separated by spaces. The new bookmark notifier remembers what it already announced in a state file.
-Its first run only creates that file, so you aren't notified about your existing bookmarks. Bookmarks imported
-with an older date aren't announced. For example, checking every 10 minutes inside the container:
+Use **Send test notification** to check your targets before saving.
 
-```
-*/10 * * * * docker exec -e LD_TOKEN=<token> -e LD_NOTIFY="ntfy+https://ntfy.example.com/linkding" -e LD_NOTIFIER_STATE=/etc/linkding/data/notifier-state.json linkding python scripts/new_bookmarks_notifier.py --url http://localhost:9090 --quiet
-```
+linkding refuses to send requests to servers on your local network by default. If your ntfy or Gotify server runs
+on your LAN, allow it with the [`LD_ALLOWED_INTERNAL_HOSTS`](https://linkding.link/options/#ld_allowed_internal_hosts)
+option, e.g. `LD_ALLOWED_INTERNAL_HOSTS=ntfy.home.arpa` or `192.168.1.20`.
 
-A single new bookmark is sent with its title, URL, description and tags, and clicking it opens the page.
-Several new bookmarks are sent as one summary.
+Both features run in linkding's background task worker, so they don't work if `LD_DISABLE_BACKGROUND_TASKS` is set.
 
 ## Running this fork
 

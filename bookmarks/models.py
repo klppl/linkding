@@ -407,6 +407,16 @@ class UserProfile(models.Model):
         ),
         (AI_TAG_MODE_EXISTING_ONLY, "Only use existing tags"),
     ]
+    LINK_CHECK_DISABLED = "disabled"
+    LINK_CHECK_DAILY = "daily"
+    LINK_CHECK_WEEKLY = "weekly"
+    LINK_CHECK_MONTHLY = "monthly"
+    LINK_CHECK_INTERVAL_CHOICES = [
+        (LINK_CHECK_DISABLED, "Disabled"),
+        (LINK_CHECK_DAILY, "Daily"),
+        (LINK_CHECK_WEEKLY, "Weekly"),
+        (LINK_CHECK_MONTHLY, "Monthly"),
+    ]
     user = models.OneToOneField(User, related_name="profile", on_delete=models.CASCADE)
     theme = models.CharField(
         max_length=10, choices=THEME_CHOICES, blank=False, default=THEME_AUTO
@@ -497,6 +507,16 @@ class UserProfile(models.Model):
     )
     ai_only_untagged = models.BooleanField(default=True, null=False)
     ai_instructions = models.TextField(blank=True, null=False)
+    notification_targets = models.TextField(blank=True, null=False)
+    notify_new_bookmarks = models.BooleanField(default=False, null=False)
+    notify_link_check = models.BooleanField(default=True, null=False)
+    link_check_interval = models.CharField(
+        max_length=10,
+        choices=LINK_CHECK_INTERVAL_CHOICES,
+        blank=False,
+        default=LINK_CHECK_DISABLED,
+    )
+    link_check_last_run = models.DateTimeField(null=True, blank=True)
 
     def save(self, *args, **kwargs):
         if self.custom_css:

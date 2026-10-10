@@ -177,6 +177,7 @@ reddit.com/r/Music music reddit</pre>
             <div class="form-group">
               {% formlabel form.ai_api_key "API key" %}
               {% formfield form.ai_api_key has_help=True class="width-50 width-sm-100" %}
+              {{ form.ai_api_key.errors }}
               {% formhelp form.ai_api_key %}
                 The API key for the selected provider. The key is stored in the linkding database and never displayed again.
                 {% if form.has_ai_api_key %}
@@ -190,6 +191,7 @@ reddit.com/r/Music music reddit</pre>
             <div class="form-group">
               {% formlabel form.ai_model_preset "Model" %}
               {% formfield form.ai_model_preset has_help=True class="width-50 width-sm-100" %}
+              {{ form.ai_model_preset.errors }}
               {% formhelp form.ai_model_preset %}
                 The model used for tagging. The default is the cheapest recommended model of the provider:
                 <code>{{ ai_default_models.anthropic }}</code> for Anthropic, <code>{{ ai_default_models.openai }}</code> for OpenAI.
@@ -199,6 +201,7 @@ reddit.com/r/Music music reddit</pre>
             <div class="form-group">
               {% formlabel form.ai_model "Custom model" %}
               {% formfield form.ai_model has_help=True class="width-50 width-sm-100" placeholder="e.g. claude-sonnet-5" %}
+              {{ form.ai_model.errors }}
               {% formhelp form.ai_model %}
                 The model ID as listed in the provider's documentation. Only used when "Custom model..." is selected above.
               {% endformhelp %}
@@ -213,6 +216,7 @@ reddit.com/r/Music music reddit</pre>
             <div class="form-group">
               {% formlabel form.ai_max_tags "Maximum number of tags" %}
               {% formfield form.ai_max_tags has_help=True min="1" max="10" class="width-25 width-sm-100" %}
+              {{ form.ai_max_tags.errors }}
               {% formhelp form.ai_max_tags %}
                 The maximum number of tags the AI adds to a bookmark (1-10).
               {% endformhelp %}
@@ -241,6 +245,62 @@ reddit.com/r/Music music reddit</pre>
               <button class="btn" name="ai_tag_untagged_bookmarks">Tag all untagged bookmarks with AI</button>
             {% endif %}
           </details>
+        </div>
+        <div class="form-group">
+          <details {% if form.notification_targets.value or form.notification_targets.errors %}open{% endif %}>
+            <summary>
+              <span class="form-label d-inline-block">Notifications</span>
+            </summary>
+            <div class="form-group">
+              <label for="{{ form.notification_targets.id_for_label }}" class="form-label">Notification targets</label>
+              {% formfield form.notification_targets has_help=True class="monospace" rows="3" placeholder="ntfy+https://ntfy.example.com/linkding" %}
+              {{ form.notification_targets.errors }}
+              {% formhelp form.notification_targets %}
+                Where to send notifications, one URL per line. Supported:
+                <pre>https://ntfy.sh/&lt;topic&gt;
+ntfy+https://&lt;token or user:password&gt;@ntfy.example.com/&lt;topic&gt;
+https://discord.com/api/webhooks/&lt;id&gt;/&lt;token&gt;
+https://hooks.slack.com/services/...
+slack+https://mattermost.example.com/hooks/...
+gotify+https://gotify.example.com/message?token=&lt;app token&gt;
+telegram://&lt;bot token&gt;/&lt;chat id&gt;
+json+https://example.com/hook</pre>
+                The <code>json+</code> target POSTs <code>{"title", "message", "url"}</code> to any URL.
+                Servers on your local network must be allowed with the
+                <a href="https://linkding.link/options/#ld_allowed_internal_hosts"
+                   target="_blank"
+                   rel="noopener"><code>LD_ALLOWED_INTERNAL_HOSTS</code></a> option.
+              {% endformhelp %}
+              <button class="btn mt-2" name="send_test_notification">Send test notification</button>
+            </div>
+            <div class="form-group">
+              {% formfield form.notify_new_bookmarks label="Notify about new bookmarks" has_help=True %}
+              {% formhelp form.notify_new_bookmarks %}
+                Sends a notification about a minute after a bookmark is added, so that its title and tags (including AI tags) are available.
+                Imported bookmarks don't send notifications.
+              {% endformhelp %}
+            </div>
+            <div class="form-group">
+              {% formfield form.notify_link_check label="Notify about link check problems" has_help=True %}
+              {% formhelp form.notify_link_check %}
+                Sends a notification when the link check below finds new dead links or duplicates.
+              {% endformhelp %}
+            </div>
+          </details>
+        </div>
+        <div class="form-group">
+          {% formlabel form.link_check_interval "Link check" %}
+          {% formfield form.link_check_interval has_help=True class="width-25 width-sm-100" %}
+          {% formhelp form.link_check_interval %}
+            Regularly checks all bookmarks for dead links and duplicates. Nothing is deleted, problems are tagged so you can review them:
+            <code>#dead-link</code> for pages that return 404 or 410 or whose domain no longer exists, and
+            <code>#duplicate</code> for bookmarks pointing to the same page (ignoring http/https, <code>www.</code>, trailing slashes and tracking parameters).
+            Tags are removed again once the problem is gone. Temporary errors like timeouts are ignored.
+            {% if request.user_profile.link_check_last_run %}
+              Last run: {{ request.user_profile.link_check_last_run|date:"SHORT_DATETIME_FORMAT" }}.
+            {% endif %}
+          {% endformhelp %}
+          {% if background_tasks_enabled %}<button class="btn mt-2" name="run_link_check">Run link check now</button>{% endif %}
         </div>
         <div class="form-group">
           {% formfield form.enable_favicons label="Enable Favicons" has_help=True %}

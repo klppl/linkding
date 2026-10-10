@@ -55,6 +55,8 @@ logger = logging.getLogger(__name__)
 
 # Re-exported so that callers do not need to import requests themselves
 RequestException = requests.RequestException
+RequestConnectionError = requests.ConnectionError
+RequestTimeout = requests.Timeout
 
 SETTING_NAME = "LD_ALLOWED_INTERNAL_HOSTS"
 ALLOW_ALL = "*"

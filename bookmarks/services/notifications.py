@@ -1,36 +1,35 @@
-#!/usr/bin/env python3
 """
 Sends notifications to ntfy, Discord, Slack, Gotify, Telegram or any JSON
-webhook. Used by the other scripts in this folder, and can be run on its own to
-test a notification target:
+webhook. Targets are configured as URLs in the user profile, one per line.
+Most services are detected from the URL, others need a prefix:
 
-    python3 notify.py "ntfy+https://ntfy.example.com/linkding" "Hello from linkding"
-
-Notification targets are URLs. Most services are detected from the URL, others
-need a prefix that names the service:
-
-    https://ntfy.sh/<topic>                         ntfy.sh
-    ntfy+https://<user>:<password>@ntfy.example.com/<topic>
-    ntfy+https://<access token>@ntfy.example.com/<topic>
-    https://discord.com/api/webhooks/<id>/<token>   Discord
-    https://hooks.slack.com/services/...            Slack
-    slack+https://mattermost.example.com/hooks/...  Slack-compatible (Mattermost, ...)
+    https://ntfy.sh/<topic>
+    ntfy+https://<token or user:password>@ntfy.example.com/<topic>
+    https://discord.com/api/webhooks/<id>/<token>
+    https://hooks.slack.com/services/...
+    slack+https://mattermost.example.com/hooks/...
     gotify+https://gotify.example.com/message?token=<app token>
     telegram://<bot token>/<chat id>
-    json+https://example.com/hook                   POSTs {"title", "message", "url"}
+    json+https://example.com/hook
 
-Only uses the Python standard library.
+Requests go through the SSRF protected HTTP client, so targets on internal
+networks must be allowed with the LD_ALLOWED_INTERNAL_HOSTS option.
 """
 
-import argparse
 import base64
-import json
-import sys
+import logging
 import urllib.parse
-import urllib.request
 from dataclasses import dataclass
 
+from django.conf import settings
+
+from bookmarks.models import Bookmark, UserProfile
+from bookmarks.services import http_client
+
+logger = logging.getLogger(__name__)
+
 TIMEOUT = 15
+SERVICES = ("ntfy", "discord", "slack", "gotify", "telegram", "json")
 
 
 @dataclass
@@ -46,12 +45,37 @@ class NotifyError(Exception):
 
 
 def parse_targets(value: str | None) -> list[str]:
-    """Parses a whitespace separated list of target URLs, e.g. from an env variable."""
-    return value.split() if value else []
+    """Parses targets from a text with one URL per line, ignoring # comments."""
+    targets = []
+    for line in (value or "").splitlines():
+        line = line.strip()
+        if line and not line.startswith("#"):
+            targets.append(line)
+    return targets
+
+
+def validate_target(target: str):
+    """Raises NotifyError if the target URL is not supported."""
+    service, url = _detect_service(target)
+    if service == "telegram":
+        _parse_telegram(url)
+        return
+    parts = urllib.parse.urlsplit(url)
+    if parts.scheme not in ("http", "https") or not parts.hostname:
+        raise NotifyError(f"Invalid URL: {redact(target)}")
+    if service == "ntfy":
+        _ntfy_topic(parts)
+
+
+def is_active(profile: UserProfile) -> bool:
+    background_tasks_enabled = not settings.LD_DISABLE_BACKGROUND_TASKS
+    return background_tasks_enabled and bool(
+        parse_targets(profile.notification_targets)
+    )
 
 
 def send(target: str, notification: Notification):
-    """Sends a notification to a single target URL. Raises NotifyError on failure."""
+    """Sends a notification to a single target. Raises NotifyError on failure."""
     service, url = _detect_service(target)
     try:
         if service == "ntfy":
@@ -68,23 +92,55 @@ def send(target: str, notification: Notification):
             _send_json(url, notification)
     except NotifyError:
         raise
-    except Exception as e:
-        raise NotifyError(f"{service}: {e}") from e
+    except http_client.RequestException as e:
+        raise NotifyError(f"{service}: {_describe_error(e)}") from e
 
 
-def send_all(targets: list[str], notification: Notification) -> list[str]:
+def _describe_error(error: Exception) -> str:
+    # Don't use the exception message, it can contain the request URL, which
+    # can contain secrets like webhook or bot tokens
+    if isinstance(error, http_client.BlockedAddressError):
+        return str(error)
+    if isinstance(error, http_client.RequestTimeout):
+        return "request timed out"
+    if isinstance(error, http_client.RequestConnectionError):
+        return "connection failed"
+    return error.__class__.__name__
+
+
+def send_to_targets(targets: list[str], notification: Notification) -> list[str]:
     """Sends a notification to all targets. Returns error messages for failed targets."""
     errors = []
     for target in targets:
         try:
             send(target, notification)
         except NotifyError as e:
-            errors.append(f"Failed to send notification to {redact(target)}: {e}")
+            message = f"Failed to send notification to {redact(target)}: {e}"
+            logger.warning(message)
+            errors.append(message)
     return errors
 
 
+def send_to_user(profile: UserProfile, notification: Notification) -> list[str]:
+    return send_to_targets(parse_targets(profile.notification_targets), notification)
+
+
+def new_bookmark_notification(bookmark: Bookmark) -> Notification:
+    lines = [bookmark.url] if bookmark.title else []
+    if bookmark.description:
+        lines.append(_truncate(bookmark.description, 300))
+    tag_names = bookmark.tag_names
+    if tag_names:
+        lines.append(" ".join(f"#{tag}" for tag in tag_names))
+    return Notification(
+        title=f"New bookmark: {bookmark.resolved_title}",
+        message="\n".join(lines) or bookmark.url,
+        url=bookmark.url,
+    )
+
+
 def redact(target: str) -> str:
-    """Hides credentials in a target URL, for logging."""
+    """Hides credentials in a target URL, for logging and error messages."""
     if target.startswith("telegram://"):
         return "telegram://***"
     parts = urllib.parse.urlsplit(target)
@@ -101,7 +157,7 @@ def _detect_service(target: str) -> tuple[str, str]:
     scheme, _, rest = target.partition("://")
     if "+" in scheme:
         service, _, real_scheme = scheme.partition("+")
-        if service not in ("ntfy", "discord", "slack", "gotify", "json"):
+        if service not in SERVICES or service == "telegram":
             raise NotifyError(f"Unknown notification service: {service}")
         return service, f"{real_scheme}://{rest}"
 
@@ -119,15 +175,16 @@ def _detect_service(target: str) -> tuple[str, str]:
 
 
 def _post_json(url: str, payload: dict, headers: dict | None = None):
-    request = urllib.request.Request(
-        url, data=json.dumps(payload).encode(), method="POST"
+    response = http_client.request(
+        "POST",
+        url,
+        json=payload,
+        headers={"User-Agent": "linkding", **(headers or {})},
+        timeout=TIMEOUT,
+        allow_redirects=False,
     )
-    request.add_header("Content-Type", "application/json")
-    request.add_header("User-Agent", "linkding-notify")
-    for name, value in (headers or {}).items():
-        request.add_header(name, value)
-    with urllib.request.urlopen(request, timeout=TIMEOUT) as response:
-        return response.read()
+    if not response.ok:
+        raise NotifyError(f"HTTP {response.status_code}")
 
 
 def _truncate(text: str, max_length: int) -> str:
@@ -154,12 +211,17 @@ def _split_credentials(url: str) -> tuple[str, dict]:
     return clean_url, headers
 
 
-def _send_ntfy(url: str, notification: Notification):
-    url, headers = _split_credentials(url)
-    parts = urllib.parse.urlsplit(url)
+def _ntfy_topic(parts: urllib.parse.SplitResult) -> str:
     topic = parts.path.strip("/")
     if not topic or "/" in topic:
         raise NotifyError("ntfy URL must have the form https://<server>/<topic>")
+    return topic
+
+
+def _send_ntfy(url: str, notification: Notification):
+    url, headers = _split_credentials(url)
+    parts = urllib.parse.urlsplit(url)
+    topic = _ntfy_topic(parts)
     # Publish as JSON to the server root, which supports non-ASCII titles
     server_url = urllib.parse.urlunsplit((parts.scheme, parts.netloc, "/", "", ""))
     payload = {
@@ -202,19 +264,25 @@ def _send_gotify(url: str, notification: Notification):
     )
 
 
-def _send_telegram(url: str, notification: Notification):
+def _parse_telegram(url: str) -> tuple[str, str]:
     bot_token, _, chat_id = url[len("telegram://") :].partition("/")
+    chat_id = chat_id.strip("/")
     if not bot_token or not chat_id:
         raise NotifyError(
             "Telegram URL must have the form telegram://<bot token>/<chat id>"
         )
+    return bot_token, chat_id
+
+
+def _send_telegram(url: str, notification: Notification):
+    bot_token, chat_id = _parse_telegram(url)
     text = f"{notification.title}\n\n{notification.message}"
     if notification.url:
         text += f"\n{notification.url}"
     _post_json(
         f"https://api.telegram.org/bot{bot_token}/sendMessage",
         {
-            "chat_id": chat_id.strip("/"),
+            "chat_id": chat_id,
             "text": _truncate(text, 4096),
             "disable_web_page_preview": True,
         },
@@ -230,23 +298,3 @@ def _send_json(url: str, notification: Notification):
             "url": notification.url,
         },
     )
-
-
-def main(argv=None):
-    parser = argparse.ArgumentParser(description="Send a test notification.")
-    parser.add_argument("target", help="notification target URL")
-    parser.add_argument("message", nargs="?", default="Test notification from linkding")
-    parser.add_argument("--title", default="linkding")
-    parser.add_argument("--url", help="link to open when clicking the notification")
-    args = parser.parse_args(argv)
-    try:
-        send(args.target, Notification(args.title, args.message, args.url))
-    except NotifyError as e:
-        print(e, file=sys.stderr)
-        return 1
-    print(f"Sent notification to {redact(args.target)}")
-    return 0
-
-
-if __name__ == "__main__":
-    sys.exit(main())

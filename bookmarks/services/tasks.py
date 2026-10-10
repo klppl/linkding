@@ -1,12 +1,15 @@
 import functools
 import logging
+from datetime import timedelta
 
 import waybackpy
 from django.conf import settings
 from django.contrib.auth.models import User
 from django.db.models import Q
 from django.utils import timezone
+from huey import crontab
 from huey.contrib.djhuey import HUEY as huey
+from huey.contrib.djhuey import db_periodic_task
 from huey.exceptions import TaskLockedException
 from waybackpy.exceptions import TooManyRequestsError, WaybackError
 
@@ -15,6 +18,8 @@ from bookmarks.services import (
     ai_tagging,
     assets,
     favicon_loader,
+    link_checker,
+    notifications,
     preview_image_loader,
 )
 from bookmarks.services.tags import get_or_create_tags
@@ -324,6 +329,90 @@ def _ai_tag_bookmark_task(bookmark_id: int):
     logger.info(
         f"Successfully tagged bookmark with AI. url={bookmark.url} tags={tag_names}"
     )
+
+
+# Wait a bit before notifying about a new bookmark, so that background tasks
+# like AI tagging and loading metadata have a chance to finish
+NEW_BOOKMARK_NOTIFICATION_DELAY = 60
+
+
+def notify_new_bookmark(user: User, bookmark: Bookmark):
+    profile = user.profile
+    if not profile.notify_new_bookmarks or not notifications.is_active(profile):
+        return
+    if NEW_BOOKMARK_NOTIFICATION_DELAY > 0:
+        _notify_new_bookmark_task.schedule(
+            args=(bookmark.id,), delay=NEW_BOOKMARK_NOTIFICATION_DELAY
+        )
+    else:
+        _notify_new_bookmark_task(bookmark.id)
+
+
+@task(retries=0)
+def _notify_new_bookmark_task(bookmark_id: int):
+    try:
+        bookmark = Bookmark.objects.select_related("owner__profile").get(id=bookmark_id)
+    except Bookmark.DoesNotExist:
+        return
+    notification = notifications.new_bookmark_notification(bookmark)
+    notifications.send_to_user(bookmark.owner.profile, notification)
+
+
+LINK_CHECK_INTERVALS = {
+    UserProfile.LINK_CHECK_DAILY: timedelta(days=1),
+    UserProfile.LINK_CHECK_WEEKLY: timedelta(days=7),
+    UserProfile.LINK_CHECK_MONTHLY: timedelta(days=30),
+}
+
+
+def schedule_link_check(user: User) -> bool:
+    if settings.LD_DISABLE_BACKGROUND_TASKS:
+        return False
+    UserProfile.objects.filter(user=user).update(link_check_last_run=timezone.now())
+    _link_check_task(user.id)
+    return True
+
+
+@task(retries=0)
+def _link_check_task(user_id: int):
+    try:
+        user = User.objects.select_related("profile").get(id=user_id)
+    except User.DoesNotExist:
+        return
+
+    try:
+        # Prevent running multiple checks for the same user at the same time
+        with huey.lock_task(f"link-check-{user_id}"):
+            result = link_checker.run_link_check(user)
+    except TaskLockedException:
+        logger.info(f"Link check is already running. user={user.username}")
+        return
+
+    profile = user.profile
+    if (
+        result.has_new_problems
+        and profile.notify_link_check
+        and notifications.is_active(profile)
+    ):
+        notifications.send_to_user(profile, link_checker.build_notification(result))
+
+
+@db_periodic_task(crontab(minute="7"))
+def _schedule_due_link_checks_task():
+    if settings.LD_DISABLE_BACKGROUND_TASKS:
+        return
+    now = timezone.now()
+    profiles = UserProfile.objects.exclude(
+        link_check_interval=UserProfile.LINK_CHECK_DISABLED
+    ).select_related("user")
+    for profile in profiles:
+        interval = LINK_CHECK_INTERVALS.get(profile.link_check_interval)
+        if not interval or not profile.user.is_active:
+            continue
+        last_run = profile.link_check_last_run
+        if last_run is None or last_run + interval <= now:
+            logger.info(f"Scheduling link check. user={profile.user.username}")
+            schedule_link_check(profile.user)
 
 
 def is_html_snapshot_feature_active() -> bool:

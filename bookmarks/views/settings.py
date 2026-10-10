@@ -20,7 +20,7 @@ from bookmarks.models import (
     FeedToken,
     GlobalSettings,
 )
-from bookmarks.services import ai_tagging, exporter, importer, tasks
+from bookmarks.services import ai_tagging, exporter, importer, notifications, tasks
 from bookmarks.type_defs import HttpRequest
 from bookmarks.utils import app_version
 from bookmarks.views import access
@@ -58,6 +58,7 @@ def general(request: HttpRequest, status=200, context_overrides=None):
             "has_snapshot_support": has_snapshot_support,
             "ai_default_models": ai_tagging.DEFAULT_MODELS,
             "ai_tagging_available": tasks.is_ai_tagging_available(request.user),
+            "background_tasks_enabled": not django_settings.LD_DISABLE_BACKGROUND_TASKS,
             "success_message": success_message,
             "error_message": error_message,
             "version_info": version_info,
@@ -97,6 +98,21 @@ def update(request: HttpRequest):
                     request,
                     "No untagged bookmarks found.",
                     "settings_success_message",
+                )
+        if "send_test_notification" in request.POST:
+            send_test_notification(request)
+        if "run_link_check" in request.POST:
+            if tasks.schedule_link_check(request.user):
+                messages.success(
+                    request,
+                    "Link check started. Problems are tagged with #dead-link and #duplicate. This may take a while...",
+                    "settings_success_message",
+                )
+            else:
+                messages.error(
+                    request,
+                    "The link check requires background tasks, which are disabled.",
+                    "settings_error_message",
                 )
         if "create_missing_html_snapshots" in request.POST:
             count = tasks.create_missing_html_snapshots(request.user)
@@ -138,6 +154,39 @@ def update_profile(request: HttpRequest):
         "settings_error_message",
     )
     return general(request, 422, {"form": form})
+
+
+def send_test_notification(request: HttpRequest):
+    # Use the targets from the form, so they can be tested before saving
+    targets = notifications.parse_targets(request.POST.get("notification_targets"))
+    if not targets:
+        messages.error(
+            request,
+            "Add at least one notification target to send a test notification.",
+            "settings_error_message",
+        )
+        return
+    errors = []
+    for target in targets:
+        try:
+            notifications.validate_target(target)
+        except notifications.NotifyError as e:
+            errors.append(str(e))
+    if not errors:
+        errors = notifications.send_to_targets(
+            targets,
+            notifications.Notification(
+                "linkding", "Test notification from linkding. It works!"
+            ),
+        )
+    if errors:
+        messages.error(request, " ".join(errors), "settings_error_message")
+    else:
+        messages.success(
+            request,
+            f"Sent test notification to {len(targets)} target(s).",
+            "settings_success_message",
+        )
 
 
 def update_global_settings(request):

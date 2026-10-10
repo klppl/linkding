@@ -41,6 +41,8 @@ def create_bookmark(
         not current_user.profile.ai_only_untagged or not bookmark.tags.exists()
     ):
         tasks.ai_tag_bookmark(current_user, bookmark)
+    # Notify about new bookmark
+    tasks.notify_new_bookmark(current_user, bookmark)
     # Create snapshot on web archive
     tasks.create_web_archive_snapshot(current_user, bookmark, False)
     # Load favicon

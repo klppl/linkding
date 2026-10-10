@@ -58,6 +58,10 @@ class SettingsGeneralViewTestCase(TestCase, BookmarkFactoryMixin):
             "ai_max_tags": "3",
             "ai_only_untagged": True,
             "ai_instructions": "",
+            "notification_targets": "",
+            "notify_new_bookmarks": False,
+            "notify_link_check": True,
+            "link_check_interval": UserProfile.LINK_CHECK_DISABLED,
         }
 
         return {**form_data, **overrides}
@@ -141,6 +145,10 @@ class SettingsGeneralViewTestCase(TestCase, BookmarkFactoryMixin):
             "ai_max_tags": "5",
             "ai_only_untagged": False,
             "ai_instructions": "Use singular nouns",
+            "notification_targets": "https://ntfy.sh/linkding",
+            "notify_new_bookmarks": True,
+            "notify_link_check": False,
+            "link_check_interval": UserProfile.LINK_CHECK_WEEKLY,
         }
         response = self.client.post(
             reverse("linkding:settings.update"), form_data, follow=True
@@ -239,6 +247,14 @@ class SettingsGeneralViewTestCase(TestCase, BookmarkFactoryMixin):
         self.assertEqual(self.user.profile.ai_max_tags, 5)
         self.assertEqual(self.user.profile.ai_only_untagged, False)
         self.assertEqual(self.user.profile.ai_instructions, "Use singular nouns")
+        self.assertEqual(
+            self.user.profile.notification_targets, "https://ntfy.sh/linkding"
+        )
+        self.assertEqual(self.user.profile.notify_new_bookmarks, True)
+        self.assertEqual(self.user.profile.notify_link_check, False)
+        self.assertEqual(
+            self.user.profile.link_check_interval, UserProfile.LINK_CHECK_WEEKLY
+        )
 
     def test_update_profile_ai_model_presets(self):
         # Default
@@ -281,6 +297,20 @@ class SettingsGeneralViewTestCase(TestCase, BookmarkFactoryMixin):
         )
         response = self.client.post(reverse("linkding:settings.update"), form_data)
         self.assertEqual(response.status_code, 422)
+
+    def test_update_profile_shows_ai_field_errors(self):
+        form_data = self.create_profile_form_data(
+            {"ai_model_preset": "custom", "ai_model": "", "ai_max_tags": "11"}
+        )
+        response = self.client.post(reverse("linkding:settings.update"), form_data)
+        self.assertContains(
+            response, "Enter a model name or select a model.", status_code=422
+        )
+        self.assertContains(
+            response,
+            "Ensure this value is less than or equal to 10.",
+            status_code=422,
+        )
 
     def test_update_profile_rejects_unknown_preset(self):
         form_data = self.create_profile_form_data({"ai_model_preset": "unknown"})
