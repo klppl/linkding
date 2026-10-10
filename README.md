@@ -70,13 +70,27 @@ Both features run in linkding's background task worker, so they don't work if `L
 
 ## Running this fork
 
-The official Docker images (`sissbruecker/linkding`) do **not** include these changes. Build your own image:
+The official Docker images (`sissbruecker/linkding`) do **not** include these changes.
+
+**Build with GitHub Actions:** open **Actions → Build image → Run workflow** and choose your server's
+architecture (`amd64` for Hetzner CX/CPX/CCX, `arm64` for CAX). It builds on a native runner, without
+emulation, and reuses cached layers from earlier runs. The image is pushed to the GitHub Container Registry:
+
+```
+ghcr.io/<your GitHub user>/linkding:latest        # also tagged with the version and commit, e.g. :sha-1a2b3c4
+ghcr.io/<your GitHub user>/linkding:latest-plus   # "plus" variant, includes Chromium for HTML snapshots
+```
+
+New packages on GHCR are private, so either make the package public in its settings on GitHub, or log in on the
+server with `docker login ghcr.io` using a personal access token with the `read:packages` scope.
+
+**Or build on the server:**
 
 ```
 docker build -f docker/default.Dockerfile --target linkding -t linkding-modified .
 ```
 
-Then follow the upstream [installation guide](https://linkding.link/installation), using `linkding-modified`
+Then follow the upstream [installation guide](https://linkding.link/installation), using your image
 in place of `sissbruecker/linkding:latest` (for example in `docker-compose.yml`).
 Database migrations run automatically on startup.
 
